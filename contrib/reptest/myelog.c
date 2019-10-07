@@ -29,18 +29,31 @@
 #define ERROR		20			/* user error - abort transaction; return to
 								 * known state */
 
+static int error;
+
 bool errstart(int elevel, const char *filename, int lineno,
               const char *funcname, const char *domain)
 {
     if (elevel == ERROR)
     {
-        raise(SIGINT);
+        fprintf(stderr, "%s:%d %s, %s", filename, lineno, funcname, domain);
+        error = 1;
     }
     return true;
 }
 
-void errfinish(int dummy, ...)
+void errfinish(int dummy, const char* fmt, ...)
 {
+    va_list args;
+    int result;
+    va_start(args, fmt);
+    result = vprintf(fmt, args);
+    va_end(args);
+
+    if (error == 1)
+    {
+        raise(SIGINT);
+    }
 }
 
 int
