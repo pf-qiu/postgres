@@ -33,12 +33,12 @@ int main(int argc, char **argv)
     (void)walrcv_identify_system(wrconn, &startpointTLI);
 
     XLogRecPtr lsn;
-    char* snapshot = walrcv_create_slot(wrconn, subname, true, CRS_NOEXPORT_SNAPSHOT);
+    char* snapshot = walrcv_create_slot(wrconn, subname, true, CRS_USE_SNAPSHOT);
     printf("snapshot %s:\n", snapshot);
 
     /* Build logical replication streaming options. */
     options.logical = true;
-    options.startpoint = origin_startpos;
+    options.startpoint = 0;
     options.slotname = subname;
     options.proto.logical.proto_version = LOGICALREP_PROTO_VERSION_NUM;
     options.proto.logical.publication_names = pubname;
@@ -363,7 +363,7 @@ apply_handle_truncate(StringInfo s)
     printf("remote_relids_length: %ld\n", remote_relids.size());
     for (size_t i = 0; i < remote_relids.size(); i++)
     {
-        printf("remote_relids[%ld]: %d", i, remote_relids[i]);
+        printf("remote_relids[%ld]: %d\n", i, remote_relids[i]);
     }
 }
 
@@ -412,4 +412,6 @@ static void apply_dispatch(StringInfo s)
     default:
         fprintf(stderr, "invalid logical replication message type \"%c\"", action);
     }
+
+    printf("\n");
 }
