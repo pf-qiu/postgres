@@ -1,5 +1,5 @@
 PROGRAM    = reptest
-OBJS       = reptest.o libpqwalreceiver.o myelog.o pqformat.o stringinfo.o
+OBJS       = reptest.o libpqwalreceiver.o myelog.o pqformat.o stringinfo.o walproto.o
 
 PG_CPPFLAGS = -I$(libpq_srcdir)
 PG_LIBS = $(libpq_pgport) -lstdc++
