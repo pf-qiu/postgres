@@ -3,35 +3,38 @@
 static void apply_dispatch(StringInfo s);
 static void send_feedback(WalReceiverConn *wrconn, XLogRecPtr recvpos);
 
-int main()
+int main(int argc, char **argv)
 {
+    if (argc < 4)
+    {
+        printf("%s connstr pub sub", argv[0]);
+        return 0;
+    }
     char *err;
     WalReceiverConn *wrconn = NULL;
     TimeLineID startpointTLI;
     WalRcvStreamOptions options;
 
     XLogRecPtr origin_startpos = 0;
-    char myslotname[] = "mysub1";
-    char mypubname[] = "mypub";
 
-    wrconn = walrcv_connect("port=5432 host=127.0.0.1 user=qpf dbname=test", true, "mysub", &err);
+    wrconn = walrcv_connect(argv[1], true, argv[3], &err);
     if (wrconn == NULL)
     {
         fprintf(stderr, "could not connect to the publisher: %s", err);
         return 1;
     }
     /*
-		 * We don't really use the output identify_system for anything but it
-		 * does some initializations on the upstream so let's still call it.
-		 */
+	 * We don't really use the output identify_system for anything but it
+	 * does some initializations on the upstream so let's still call it.
+	 */
     (void)walrcv_identify_system(wrconn, &startpointTLI);
 
     /* Build logical replication streaming options. */
     options.logical = true;
     options.startpoint = origin_startpos;
-    options.slotname = myslotname;
+    options.slotname = argv[3];
     options.proto.logical.proto_version = LOGICALREP_PROTO_VERSION_NUM;
-    options.proto.logical.publication_names = mypubname;
+    options.proto.logical.publication_names = argv[2];
 
     /* Start normal logical streaming replication. */
     walrcv_startstreaming(wrconn, &options);
@@ -112,7 +115,7 @@ int main()
         }
 
         send_feedback(wrconn, last_received);
-        
+
         sleep(1);
     }
     TimeLineID tli;
