@@ -2,7 +2,7 @@
 #include "postgres.h"
 #include "nodes/pg_list.h"
 #include "utils/tuplestore.h"
-//#include "replication/logicalproto.h"
+
 /*
  * What to do with a snapshot in create replication slot command.
  */
@@ -94,3 +94,6 @@ extern int walrcv_receive (WalReceiverConn *conn, char **buffer,
 extern void walrcv_send (WalReceiverConn *conn, const char *buffer,
 								int nbytes);
 extern void walrcv_disconnect (WalReceiverConn *conn);
+
+extern char *walrcv_create_slot(WalReceiverConn *conn, const char *slotname,
+					 bool temporary, CRSSnapshotAction snapshot_action);

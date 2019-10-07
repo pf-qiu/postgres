@@ -541,6 +541,65 @@ walrcv_send(WalReceiverConn *conn, const char *buffer, int nbytes)
 						(PQerrorMessage(conn->streamConn)))));
 }
 
+
+/*
+ * Create new replication slot.
+ * Returns the name of the exported snapshot for logical slot or NULL for
+ * physical slot.
+ */
+char *
+walrcv_create_slot(WalReceiverConn *conn, const char *slotname,
+					 bool temporary, CRSSnapshotAction snapshot_action)
+{
+	PGresult   *res;
+	StringInfoData cmd;
+	char	   *snapshot;
+
+	initStringInfo(&cmd);
+
+	appendStringInfo(&cmd, "CREATE_REPLICATION_SLOT \"%s\"", slotname);
+
+	if (temporary)
+		appendStringInfoString(&cmd, " TEMPORARY");
+
+	if (conn->logical)
+	{
+		appendStringInfoString(&cmd, " LOGICAL pgoutput");
+		switch (snapshot_action)
+		{
+			case CRS_EXPORT_SNAPSHOT:
+				appendStringInfoString(&cmd, " EXPORT_SNAPSHOT");
+				break;
+			case CRS_NOEXPORT_SNAPSHOT:
+				appendStringInfoString(&cmd, " NOEXPORT_SNAPSHOT");
+				break;
+			case CRS_USE_SNAPSHOT:
+				appendStringInfoString(&cmd, " USE_SNAPSHOT");
+				break;
+		}
+	}
+
+	res = walrcv_PQexec(conn->streamConn, cmd.data);
+	pfree(cmd.data);
+
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		PQclear(res);
+		ereport(ERROR,
+				(errmsg("could not create replication slot \"%s\": %s",
+						slotname, PQerrorMessage(conn->streamConn))));
+	}
+
+	if (!PQgetisnull(res, 0, 2))
+		snapshot = pstrdup(PQgetvalue(res, 0, 2));
+	else
+		snapshot = NULL;
+
+	PQclear(res);
+
+	return snapshot;
+}
+
 /*
  * Given a List of strings, return it as single comma separated
  * string, quoting identifiers as needed.
