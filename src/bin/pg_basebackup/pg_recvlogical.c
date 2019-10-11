@@ -55,7 +55,7 @@ static size_t noptions = 0;
 static const char *plugin = "test_decoding";
 
 /* Global State */
-static int	outfd = -1;
+static FILE* outfd = NULL;
 static volatile sig_atomic_t time_to_abort = false;
 static volatile sig_atomic_t output_reopen = false;
 static bool output_isfile;
@@ -69,6 +69,8 @@ static void StreamLogicalLog(void);
 static bool flushAndSendFeedback(PGconn *conn, TimestampTz *now);
 static void prepareToTerminate(PGconn *conn, XLogRecPtr endpos,
 							   bool keepalive, XLogRecPtr lsn);
+
+static bool parse_logical(FeStringInfo *s);
 
 static void
 usage(void)
@@ -190,7 +192,7 @@ OutputFsync(TimestampTz now)
 	if (!output_isfile)
 		return true;
 
-	if (fsync(outfd) != 0)
+	if (fflush(outfd) != 0)
 	{
 		pg_log_fatal("could not fsync file \"%s\": %m", outfile);
 		exit(1);
@@ -274,12 +276,9 @@ StreamLogicalLog(void)
 
 	while (!time_to_abort)
 	{
-		int			r;
-		int			bytes_left;
-		int			bytes_written;
+		int r;
 		TimestampTz now;
-		int			hdr_len;
-		XLogRecPtr	cur_record_lsn = InvalidXLogRecPtr;
+		XLogRecPtr cur_record_lsn = InvalidXLogRecPtr;
 
 		if (copybuf != NULL)
 		{
@@ -292,7 +291,7 @@ StreamLogicalLog(void)
 		 */
 		now = feGetCurrentTimestamp();
 
-		if (outfd != -1 &&
+		if (outfd != NULL &&
 			feTimestampDifferenceExceeds(output_last_fsync, now,
 										 fsync_interval))
 		{
@@ -312,36 +311,35 @@ StreamLogicalLog(void)
 		}
 
 		/* got SIGHUP, close output file */
-		if (outfd != -1 && output_reopen && strcmp(outfile, "-") != 0)
+		if (outfd != NULL && output_reopen && strcmp(outfile, "-") != 0)
 		{
 			now = feGetCurrentTimestamp();
 			if (!OutputFsync(now))
 				goto error;
-			close(outfd);
-			outfd = -1;
+			fclose(outfd);
+			outfd = NULL;
 		}
 		output_reopen = false;
 
 		/* open the output file, if not open yet */
-		if (outfd == -1)
+		if (outfd == NULL)
 		{
-			struct stat statbuf;
-
 			if (strcmp(outfile, "-") == 0)
-				outfd = fileno(stdout);
+			{
+				outfd = stdout;
+				output_isfile = false;
+			}
 			else
-				outfd = open(outfile, O_CREAT | O_APPEND | O_WRONLY | PG_BINARY,
-							 S_IRUSR | S_IWUSR);
-			if (outfd == -1)
+			{
+				outfd = fopen(outfile, "w");
+				output_isfile = true;
+			}
+
+			if (outfd == NULL)
 			{
 				pg_log_error("could not open log file \"%s\": %m", outfile);
 				goto error;
 			}
-
-			if (fstat(outfd, &statbuf) != 0)
-				pg_log_error("could not stat file \"%s\": %m", outfile);
-
-			output_isfile = S_ISREG(statbuf.st_mode) && !isatty(outfd);
 		}
 
 		r = PQgetCopyData(conn, &copybuf, 1);
@@ -502,23 +500,22 @@ StreamLogicalLog(void)
 			goto error;
 		}
 
-		/*
-		 * Read the header of the XLogData message, enclosed in the CopyData
-		 * message. We only need the WAL location field (dataStart), the rest
-		 * of the header is ignored.
-		 */
-		hdr_len = 1;			/* msgtype 'w' */
-		hdr_len += 8;			/* dataStart */
-		hdr_len += 8;			/* walEnd */
-		hdr_len += 8;			/* sendTime */
-		if (r < hdr_len + 1)
+		FeStringInfo s;
+		s.buf = copybuf + 1;
+		s.len = r - 1;
+
+		if (s.len < 24)
 		{
-			pg_log_error("streaming header too small: %d", r);
+			pg_log_error("streaming header too small: %d", s.len);
 			goto error;
 		}
 
 		/* Extract WAL location for this block */
-		cur_record_lsn = fe_recvint64(&copybuf[1]);
+		string_getmsguint64(&s, &cur_record_lsn);
+
+		int64 end_lsn, send_time;
+		string_getmsgint64(&s, &end_lsn);
+		string_getmsgint64(&s, &send_time);
 
 		if (endpos != InvalidXLogRecPtr && cur_record_lsn > endpos)
 		{
@@ -533,40 +530,12 @@ StreamLogicalLog(void)
 			break;
 		}
 
+		if (!parse_logical(&s))
+			goto error;
 		output_written_lsn = Max(cur_record_lsn, output_written_lsn);
-
-		bytes_left = r - hdr_len;
-		bytes_written = 0;
 
 		/* signal that a fsync is needed */
 		output_needs_fsync = true;
-
-		while (bytes_left)
-		{
-			int			ret;
-
-			ret = write(outfd,
-						copybuf + hdr_len + bytes_written,
-						bytes_left);
-
-			if (ret < 0)
-			{
-				pg_log_error("could not write %u bytes to log file \"%s\": %m",
-							 bytes_left, outfile);
-				goto error;
-			}
-
-			/* Write was successful, advance our position */
-			bytes_written += ret;
-			bytes_left -= ret;
-		}
-
-		if (write(outfd, "\n", 1) != 1)
-		{
-			pg_log_error("could not write %u bytes to log file \"%s\": %m",
-						 1, outfile);
-			goto error;
-		}
 
 		if (endpos != InvalidXLogRecPtr && cur_record_lsn == endpos)
 		{
@@ -597,17 +566,17 @@ StreamLogicalLog(void)
 	}
 	PQclear(res);
 
-	if (outfd != -1 && strcmp(outfile, "-") != 0)
+	if (outfd != NULL && strcmp(outfile, "-") != 0)
 	{
 		TimestampTz t = feGetCurrentTimestamp();
 
 		/* no need to jump to error on failure here, we're finishing anyway */
 		OutputFsync(t);
 
-		if (close(outfd) != 0)
+		if (fclose(outfd) != 0)
 			pg_log_error("could not close file \"%s\": %m", outfile);
 	}
-	outfd = -1;
+	outfd = NULL;
 error:
 	if (copybuf != NULL)
 	{
@@ -1027,4 +996,212 @@ prepareToTerminate(PGconn *conn, XLogRecPtr endpos, bool keepalive, XLogRecPtr l
 						(uint32) (endpos >> 32), (uint32) (endpos),
 						(uint32) (lsn >> 32), (uint32) lsn);
 	}
+}
+
+static bool apply_handle_begin(FeStringInfo *s);
+static bool apply_handle_commit(FeStringInfo *s);
+static bool apply_handle_insert(FeStringInfo *s);
+static bool apply_handle_update(FeStringInfo *s);
+static bool apply_handle_delete(FeStringInfo *s);
+static bool apply_handle_truncate(FeStringInfo *s);
+static bool apply_handle_relation(FeStringInfo *s);
+static bool apply_handle_type(FeStringInfo *s);
+static bool apply_handle_origin(FeStringInfo *s);
+
+static bool parse_logical(FeStringInfo *s)
+{
+	uint8 action;
+	if (!string_getmsgbyte(s, &action))
+		return false;
+
+	switch (action)
+	{
+	case 'B':
+		return apply_handle_begin(s);
+	case 'C':
+		return apply_handle_commit(s);
+	case 'I':
+		return apply_handle_insert(s);
+	case 'U':
+		return apply_handle_update(s);
+	case 'D':
+		return apply_handle_delete(s);
+	case 'T':
+		return apply_handle_truncate(s);
+	case 'R':
+		return apply_handle_relation(s);
+	case 'Y':
+		return apply_handle_type(s);
+	case 'O':
+		return apply_handle_origin(s);
+	default:
+		pg_log_error("invalid logical replication message type \"%c\"", action);
+		return false;
+	}
+}
+
+static bool apply_handle_begin(FeStringInfo *s)
+{
+	if (s->len < 20)
+	{
+		pg_log_error("invalid logical replication begin message");
+		return false;
+	}
+	int64 final_lsn, committime;
+	int32 xid;
+
+	if (!string_getmsgint64(s, &final_lsn))
+		return false;
+
+	if (!string_getmsgint64(s, &committime))
+		return false;
+
+	if (!string_getmsgint32(s, &xid))
+		return false;
+
+	printf("begin:\n");
+	printf("final_lsn: %ld\n", final_lsn);
+	printf("committime: %ld\n", committime);
+	printf("xid: %d\n", xid);
+	printf("\n");
+
+	return true;
+}
+
+static bool apply_handle_commit(FeStringInfo *s)
+{
+	if (s->len < 25)
+	{
+		pg_log_error("invalid logical replication commit message");
+	}
+	uint8 flags;
+	if (!string_getmsgbyte(s, &flags))
+		return false;
+
+	if (flags != 0)
+	{
+		pg_log_error("unrecognized flags %u in commit message", flags);
+		return false;
+	}
+
+	int64 commit_lsn, end_lsn, committime;
+	if (!string_getmsgint64(s, &commit_lsn))
+		return false;
+
+	if (!string_getmsgint64(s, &end_lsn))
+		return false;
+
+	if (!string_getmsgint64(s, &committime))
+		return false;
+
+	printf("commit:\n");
+	printf("commit_lsn: %ld\n", commit_lsn);
+	printf("end_lsn: %ld\n", end_lsn);
+	printf("committime: %ld\n", committime);
+	printf("\n");
+
+	return true;
+}
+
+static bool apply_handle_origin(FeStringInfo *s)
+{
+	return true;
+}
+
+static bool apply_handle_relation(FeStringInfo *s)
+{
+	return true;
+}
+
+static bool apply_handle_type(FeStringInfo *s)
+{
+	return true;
+}
+
+static bool apply_handle_insert(FeStringInfo *s)
+{
+	int32 relid;
+	uint8 action, kind;
+	int16 natts;
+
+	if (!string_getmsgint32(s, &relid))
+		return false;
+
+	if (!string_getmsgbyte(s, &action))
+		return false;
+
+	if (action != 'N')
+	{
+		pg_log_error("expected new tuple but got %d", action);
+		return false;
+	}
+
+	if (!string_getmsgint16(s, &natts))
+		return false;
+
+	printf("insert relid: %d\n", relid);
+	for (int32 i = 0; i < natts; i++)
+	{
+		if (!string_getmsgbyte(s, &kind))
+			return false;
+
+		switch (kind)
+		{
+		case 'n': /* null */
+			printf("NULL\n");
+			break;
+		case 'u': /* unchanged column */
+			/* we don't receive the value of an unchanged column */
+			break;
+		case 't': /* text formatted value */
+		{
+			int32 len;
+			char small_string[256];
+
+			if (!string_getmsgint32(s, &len))
+				return false;
+
+			if (len + 1 < sizeof(small_string))
+			{
+				if (!string_getmsgstring(s, small_string, len))
+					return false;
+				small_string[len] = '\0';
+				printf("%s\n", small_string);
+			}
+			else
+			{
+				if (s->len < len + 1)
+					return false;
+
+				char *large_string = pg_malloc(len + 1);
+				/* guaranteed to success */
+				string_getmsgstring(s, large_string, len);
+				large_string[len] = '\0';
+				printf("%s\n", large_string);
+				pg_free(large_string);
+			}
+		}
+		break;
+		default:
+			pg_log_error("unrecognized data representation type '%c'", kind);
+			return false;
+		}
+	}
+	printf("\n");
+	return true;
+}
+
+static bool apply_handle_update(FeStringInfo *s)
+{
+	return true;
+}
+
+static bool apply_handle_delete(FeStringInfo *s)
+{
+	return true;
+}
+
+static bool apply_handle_truncate(FeStringInfo *s)
+{
+	return true;
 }

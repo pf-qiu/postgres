@@ -678,3 +678,89 @@ fe_recvint64(char *buf)
 
 	return pg_ntoh64(n64);
 }
+
+bool string_getmsguint64(FeStringInfo* s, uint64* v)
+{
+	if (s->len < sizeof(int64))
+	{
+		pg_log_error("not enough data to get int64: %d bytes left", s->len);
+		return false;
+	}
+	uint64 n64;
+	memcpy(&n64, s->buf, sizeof(n64));
+	s->len -= sizeof(n64);
+	s->buf += sizeof(n64);
+	*v = pg_ntoh64(n64);
+	return true;
+}
+
+bool string_getmsgint64(FeStringInfo* s, int64* v)
+{
+	if (s->len < sizeof(int64))
+	{
+		pg_log_error("not enough data to get int64: %d bytes left", s->len);
+		return false;
+	}
+	uint64 n64;
+	memcpy(&n64, s->buf, sizeof(n64));
+	s->len -= sizeof(n64);
+	s->buf += sizeof(n64);
+	*v = pg_ntoh64(n64);
+	return true;
+}
+
+bool string_getmsgint32(FeStringInfo* s, int32* v)
+{
+	if (s->len < sizeof(int32))
+	{
+		pg_log_error("not enough data to get int32: %d bytes left", s->len);
+		return false;
+	}
+	uint32 n32;
+	memcpy(&n32, s->buf, sizeof(n32));
+	s->len -= sizeof(n32);
+	s->buf += sizeof(n32);
+	*v = pg_ntoh32(n32);
+	return true;
+}
+
+bool string_getmsgint16(FeStringInfo* s, int16* v)
+{
+	if (s->len < sizeof(int16))
+	{
+		pg_log_error("not enough data to get int16: %d bytes left", s->len);
+		return false;
+	}
+	uint16 n16;
+	memcpy(&n16, s->buf, sizeof(n16));
+	s->len -= sizeof(n16);
+	s->buf += sizeof(n16);
+	*v = pg_ntoh16(n16);
+	return true;
+}
+
+bool string_getmsgbyte(FeStringInfo* s, uint8* v)
+{
+	if (s->len < sizeof(uint8))
+	{
+		pg_log_error("not enough data to get byte");
+		return false;
+	}
+	*v = s->buf[0];
+	s->len -= sizeof(uint8);
+	s->buf += sizeof(uint8);
+	return true;
+}
+
+bool string_getmsgstring(FeStringInfo* s, char* str, uint32 len)
+{
+	if (s->len < len)
+	{
+		pg_log_error("not enough data to get string, %d bytes left, want %d bytes", s->len, len);
+		return false;
+	}
+	memcpy(str, s->buf, len);
+	s->buf += len;
+	s->len -= len;
+	return true;
+}

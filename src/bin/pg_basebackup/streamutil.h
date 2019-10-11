@@ -51,4 +51,20 @@ extern bool feTimestampDifferenceExceeds(TimestampTz start_time, TimestampTz sto
 extern void fe_sendint64(int64 i, char *buf);
 extern int64 fe_recvint64(char *buf);
 
+
+typedef struct FeStringInfo
+{
+	char *buf;
+	uint32 len;
+} FeStringInfo;
+
+extern bool string_getmsgint64(FeStringInfo* s, int64* v);
+extern bool string_getmsguint64(FeStringInfo* s, uint64* v);
+
+extern bool string_getmsgint32(FeStringInfo* s, int32* v);
+extern bool string_getmsgint16(FeStringInfo* s, int16* v);
+extern bool string_getmsgbyte(FeStringInfo* s, uint8* v);
+extern bool string_getmsgstring(FeStringInfo* s, char* str, uint32 len);
+
+
 #endif							/* STREAMUTIL_H */
