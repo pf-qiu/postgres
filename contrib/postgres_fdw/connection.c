@@ -333,6 +333,38 @@ make_new_connection(ConnCacheEntry *entry, UserMapping *user)
 		 entry->conn, server->servername, user->umid, user->userid);
 }
 
+
+/*
+ * Look for "krb_client_keyfile" option in user mapping.
+ * If found, set the KRB5_KTNAME environment just like we do in backend.
+ * Also remove this option from option list.
+ *
+ * This way the default(first) principal in the keytab file will be
+ * selected. If there are multiple principals, other ones won't work.
+ */
+static void setup_kerberos_env(UserMapping *user)
+{
+	ListCell *lc;
+	DefElem    *d;
+	StringInfo si = NULL;
+	foreach(lc, user->options)
+	{
+		d = (DefElem *) lfirst(lc);
+		if (strcmp(d->defname, "krb_client_keyfile") == 0)
+		{
+			si = makeStringInfo();
+			appendStringInfo(si, "KRB5_CLIENT_KTNAME=%s", defGetString(d));
+			user->options = list_delete_cell(user->options, lc);
+			putenv(si->data);
+			/* We don't want credential to be cached as file, keep it within current process.
+			 * The credential can be reused within the same session.
+			 */
+			putenv("KRB5CCNAME=MEMORY:");
+			return;
+		}
+	}
+}
+
 /*
  * Connect to remote server using specified server and user mapping properties.
  */
@@ -349,6 +381,8 @@ connect_pg_server(ForeignServer *server, UserMapping *user)
 		const char **keywords;
 		const char **values;
 		int			n;
+
+		setup_kerberos_env(user);
 
 		/*
 		 * Construct connection params from generic options of ForeignServer

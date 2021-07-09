@@ -144,6 +144,15 @@
        connection setting.
       </para>
      </listitem>
+     <listitem>
+      <para>
+       <literal>krb_client_keyfile</literal> location of keytab
+       file on fdw server host. Only the first principal in this keytab can
+       be selected. It will only be cached in backend memory to prevent other
+       users from using the ticket.
+       <literal>gssencmode</literal> same to "gssencmode" libpq option.
+      </para>
+     </listitem>
     </itemizedlist>
    </para>
 

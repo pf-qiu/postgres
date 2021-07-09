@@ -183,6 +183,16 @@ postgres_fdw_validator(PG_FUNCTION_ARGS)
 						 errmsg("sslcert and sslkey are superuser-only"),
 						 errhint("User mappings with the sslcert or sslkey options set may only be created or modified by the superuser")));
 		}
+		else if (strcmp(def->defname, "krb_client_keyfile") == 0 ||
+				 strcmp(def->defname, "gssencmode") == 0)
+		{
+			/* similarly for krb_client_keyfile / gssencmode on user mapping */
+			if (catalog == UserMappingRelationId && !superuser())
+				ereport(ERROR,
+						(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+						 errmsg("krb_client_keyfile and gssencmode are superuser-only"),
+						 errhint("User mappings with the krb_client_keyfile or gssencmode options set may only be created or modified by the superuser")));
+		}
 	}
 
 	PG_RETURN_VOID();
@@ -236,6 +246,10 @@ InitPgFdwOptions(void)
 		 */
 		{"sslcert", UserMappingRelationId, true},
 		{"sslkey", UserMappingRelationId, true},
+
+		/* kerberos settings */
+		{"krb_client_keyfile", UserMappingRelationId, false},
+		{"gssencmode", UserMappingRelationId, false},
 
 		{NULL, InvalidOid, false}
 	};
