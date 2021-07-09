@@ -188,7 +188,7 @@ ALTER USER MAPPING FOR public SERVER testserver1
 ALTER USER MAPPING FOR public SERVER testserver1
 	OPTIONS (ADD sslmode 'require');
 ERROR:  invalid option "sslmode"
-HINT:  Valid options in this context are: user, password, sslpassword, password_required, sslcert, sslkey
+HINT:  Valid options in this context are: user, password, sslpassword, password_required, sslcert, sslkey, krb_client_keyfile, gssencmode
 -- But we can add valid ones fine
 ALTER USER MAPPING FOR public SERVER testserver1
 	OPTIONS (ADD sslpassword 'dummy');
@@ -196,6 +196,8 @@ ALTER USER MAPPING FOR public SERVER testserver1
 -- permitted to check validation.
 ALTER USER MAPPING FOR public SERVER testserver1
 	OPTIONS (ADD sslkey 'value', ADD sslcert 'value');
+ALTER USER MAPPING FOR public SERVER testserver1
+	OPTIONS (ADD krb_client_keyfile 'value', ADD gssencmode 'value');
 ALTER FOREIGN TABLE ft1 OPTIONS (schema_name 'S 1', table_name 'T 1');
 ALTER FOREIGN TABLE ft2 OPTIONS (schema_name 'S 1', table_name 'T 1');
 ALTER FOREIGN TABLE ft1 ALTER COLUMN c1 OPTIONS (column_name 'C 1');
@@ -9276,6 +9278,13 @@ HINT:  User mappings with the sslcert or sslkey options set may only be created 
 ALTER USER MAPPING FOR CURRENT_USER SERVER loopback_nopw OPTIONS (ADD sslkey 'foo.key');
 ERROR:  sslcert and sslkey are superuser-only
 HINT:  User mappings with the sslcert or sslkey options set may only be created or modified by the superuser
+-- unpriv user also cannot set krb_client_keyfile / gssencmode on the user mapping
+ALTER USER MAPPING FOR CURRENT_USER SERVER loopback_nopw OPTIONS (ADD krb_client_keyfile 'foo.ktab');
+ERROR:  krb_client_keyfile and gssencmode are superuser-only
+HINT:  User mappings with the krb_client_keyfile or gssencmode options set may only be created or modified by the superuser
+ALTER USER MAPPING FOR CURRENT_USER SERVER loopback_nopw OPTIONS (ADD gssencmode 'require');
+ERROR:  krb_client_keyfile and gssencmode are superuser-only
+HINT:  User mappings with the krb_client_keyfile or gssencmode options set may only be created or modified by the superuser
 -- We're done with the role named after a specific user and need to check the
 -- changes to the public mapping.
 DROP USER MAPPING FOR CURRENT_USER SERVER loopback_nopw;

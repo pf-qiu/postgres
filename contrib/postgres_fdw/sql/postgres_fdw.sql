@@ -211,6 +211,8 @@ ALTER USER MAPPING FOR public SERVER testserver1
 -- permitted to check validation.
 ALTER USER MAPPING FOR public SERVER testserver1
 	OPTIONS (ADD sslkey 'value', ADD sslcert 'value');
+ALTER USER MAPPING FOR public SERVER testserver1
+	OPTIONS (ADD krb_client_keyfile 'value', ADD gssencmode 'value');
 
 ALTER FOREIGN TABLE ft1 OPTIONS (schema_name 'S 1', table_name 'T 1');
 ALTER FOREIGN TABLE ft2 OPTIONS (schema_name 'S 1', table_name 'T 1');
@@ -2787,6 +2789,9 @@ SELECT 1 FROM ft1_nopw LIMIT 1;
 ALTER USER MAPPING FOR CURRENT_USER SERVER loopback_nopw OPTIONS (SET password_required 'true');
 ALTER USER MAPPING FOR CURRENT_USER SERVER loopback_nopw OPTIONS (ADD sslcert 'foo.crt');
 ALTER USER MAPPING FOR CURRENT_USER SERVER loopback_nopw OPTIONS (ADD sslkey 'foo.key');
+-- unpriv user also cannot set krb_client_keyfile / gssencmode on the user mapping
+ALTER USER MAPPING FOR CURRENT_USER SERVER loopback_nopw OPTIONS (ADD krb_client_keyfile 'foo.ktab');
+ALTER USER MAPPING FOR CURRENT_USER SERVER loopback_nopw OPTIONS (ADD gssencmode 'require');
 
 -- We're done with the role named after a specific user and need to check the
 -- changes to the public mapping.
